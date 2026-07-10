@@ -23,10 +23,8 @@ await cp(path.join(root, ".openai", "hosting.json"), path.join(hostingDir, "host
 
 const serverCode = `import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const publicDir = path.resolve(__dirname, "../public");
+const publicDir = path.resolve(process.cwd(), "dist/public");
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",

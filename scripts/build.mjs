@@ -45,9 +45,13 @@ const contentTypes = {
 };
 
 function safePathname(url) {
-  const pathname = new URL(url).pathname;
-  if (pathname === "/" || pathname === "") return "/index.html";
-  return pathname;
+  try {
+    const pathname = new URL(String(url || "/"), "https://example.com").pathname;
+    if (pathname === "/" || pathname === "") return "/index.html";
+    return pathname;
+  } catch {
+    return "/index.html";
+  }
 }
 
 export default {

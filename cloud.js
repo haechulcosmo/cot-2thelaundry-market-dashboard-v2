@@ -92,9 +92,19 @@
     }
   }
 
-  function addCloudControls() {
+  async function backendAvailable() {
+    try {
+      const response = await fetch("/api/reviews", { method: "GET" });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function addCloudControls() {
     const csv = document.getElementById("csvBtn");
     if (!csv || document.getElementById("monthlyUpdateBtn")) return;
+    if (!(await backendAvailable())) return;
 
     const update = document.createElement("button");
     update.id = "monthlyUpdateBtn";

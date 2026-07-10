@@ -199,10 +199,10 @@ const isManualCarryover = record => {
 const records = APP_DATA.records;
 const monthlyHistory = APP_DATA.monthlyHistory || {};
 const completed = records.filter(r => r.month <= APP_DATA.completedThrough);
-const excludedJudgments = new Set(["기존·양도제외"]);
-const likelyJudgments = new Set(["신규"]);
-const candidateJudgments = new Set(["사용자검토"]);
-const includedJudgments = new Set(["신규"]);
+const excludedJudgments = new Set(["기존/양도매장"]);
+const likelyJudgments = new Set(["신규오픈"]);
+const candidateJudgments = new Set(["사용자검토필요"]);
+const includedJudgments = new Set(["신규오픈"]);
 const REVIEW_STORAGE_KEY = "thelaundry-review-overrides-v1";
 const baselineById = new Map(records.map(r=>[r.id,{
   brand:r.brand,judgment:r.judgment,reason:r.reason,brandStatus:r.brandStatus,
@@ -223,7 +223,7 @@ function applyOverride(id) {
   record.reason=override.note?`사용자검토: ${override.note}`:"사용자 입력으로 최종판정";
   record.brandStatus="사용자 입력";
   record.identity="사용자 확인";
-  record.reviewRequired=record.judgment==="사용자검토";
+  record.reviewRequired=record.judgment==="사용자검토필요";
   record.userEdited=true;
   record.userNote=override.note||"";
 }
@@ -286,7 +286,7 @@ function periodRecords() {
 
 function renderKpis(data) {
   const likely = data.filter(r => likelyJudgments.has(r.judgment)).length;
-  const pending = data.filter(r => r.judgment==="사용자검토").length;
+  const pending = data.filter(r => r.judgment==="사용자검토필요").length;
   const excluded = data.filter(r => excludedJudgments.has(r.judgment)).length;
   $("kCandidate").textContent = data.length.toLocaleString();
   $("kLikely").textContent = likely.toLocaleString();
@@ -472,7 +472,7 @@ function openDetail(id) {
     ["QDB 상호",r.qdbName||"-"],["판정근거",r.reason||"-"],["신원확인 근거",r.identityBasis||"-"],["네이버 Place ID",r.placeId||"-"],
     ["거리뷰 최신",fmtDate(r.roadviewLatestDate)],["거리뷰 직전",fmtDate(r.roadviewPreviousDate)]
   ];
-  const judgmentOptions=["사용자검토","신규","기존·양도제외"];
+  const judgmentOptions=["신규오픈","사용자검토필요","기존/양도매장"];
   const brandOptions=[...new Set([...brands,r.brand,"개인"])].sort((a,b)=>a.localeCompare(b,"ko"));
   $("modalBody").innerHTML = pairs.map(([k,v])=>`<div class="modal-key">${esc(k)}</div><div class="modal-val">${esc(v)}</div>`).join("")+
     (r.roadviewPairData?`<img class="roadview-pair" src="${r.roadviewPairData}" alt="직전과 최신 거리뷰 비교">`:"")+

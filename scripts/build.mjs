@@ -32,6 +32,8 @@ const serverCode = `const files = {
   "/cloud.js": ${JSON.stringify(cloudJs)}
 };
 
+const backendOrigin = "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev";
+
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
@@ -57,6 +59,42 @@ function safePathname(url) {
 export default {
   async fetch(request) {
     const pathname = safePathname(request.url);
+
+    if (pathname.startsWith("/api/")) {
+      const targetUrl = backendOrigin + pathname + new URL(String(request.url || "https://example.com"), "https://example.com").search;
+      const method = request.method || "GET";
+      const headers = new Headers(request.headers);
+      headers.set("accept", "application/json");
+      if (pathname === "/api/update" && method === "POST") {
+        headers.set("origin", backendOrigin);
+      }
+      if (method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
+            "access-control-allow-headers": "content-type"
+          }
+        });
+      }
+      const backendResponse = await fetch(targetUrl, {
+        method,
+        headers,
+        body: method === "GET" || method === "HEAD" ? undefined : await request.text()
+      });
+      return new Response(backendResponse.body, {
+        status: backendResponse.status,
+        headers: {
+          "content-type": backendResponse.headers.get("content-type") || "application/json; charset=utf-8",
+          "cache-control": "no-store",
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
+          "access-control-allow-headers": "content-type"
+        }
+      });
+    }
+
     const body = files[pathname];
     if (body != null) {
       const ext = pathname.endsWith(".js") ? ".js" : ".html";

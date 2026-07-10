@@ -496,10 +496,13 @@ def naver_match(row: dict) -> dict:
 
 def load_app_data() -> tuple[str, dict]:
     html = INDEX.read_text(encoding="utf-8")
-    match = re.search(r"const APP_DATA = (\{.*?\});\s*const records", html, re.S)
-    if not match:
+    marker = "const APP_DATA = "
+    start = html.find(marker)
+    if start < 0:
         raise RuntimeError("index.html에서 APP_DATA를 찾지 못했습니다.")
-    return html, json.loads(match.group(1))
+    json_start = start + len(marker)
+    data, _ = json.JSONDecoder().raw_decode(html[json_start:])
+    return html, data
 
 
 def is_existing_record(candidate: dict, records: list[dict]) -> bool:
@@ -636,15 +639,13 @@ def build_history_record(item: dict, row_id: int, month: str) -> dict:
 
 def replace_app_data(html: str, data: dict) -> None:
     encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    updated, count = re.subn(
-        r"const APP_DATA = \{.*?\};\s*const records",
-        f"const APP_DATA = {encoded};\nconst records",
-        html,
-        count=1,
-        flags=re.S,
-    )
-    if count != 1:
+    marker = "const APP_DATA = "
+    start = html.find(marker)
+    if start < 0:
         raise RuntimeError("APP_DATA 교체에 실패했습니다.")
+    json_start = start + len(marker)
+    _, offset = json.JSONDecoder().raw_decode(html[json_start:])
+    updated = html[:json_start] + encoded + html[json_start + offset :]
     INDEX.write_text(updated, encoding="utf-8")
 
 

@@ -1,0 +1,13 @@
+name = "thelaundry-market-dashboard"
+main = "src/worker.js"
+compatibility_date = "2026-07-01"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "REVIEWS"
+id = "5406606c66a2493986f970acc1b8e4e1"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html", "**/cloud.js"]
+fallthrough = true

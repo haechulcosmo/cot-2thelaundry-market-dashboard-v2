@@ -1,0 +1,7 @@
+work/
+outputs/
+__pycache__/
+*.log
+*.err.log
+*.out.log
+*.pyc

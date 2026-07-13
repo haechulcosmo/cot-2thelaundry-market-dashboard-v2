@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -29,8 +29,6 @@
     .card-label{font-size:13px;color:var(--muted);font-weight:700}.card-value{font-size:30px;font-weight:800;margin-top:8px;letter-spacing:-.04em}
     .card-note{font-size:12px;color:var(--muted);margin-top:3px}
     .toolbar{background:var(--paper);border-radius:16px;padding:15px;box-shadow:var(--shadow);display:grid;grid-template-columns:1fr 1fr 1fr 2fr auto;gap:10px;align-items:end}
-    .quick-range{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px}
-    .quick-range .btn{padding:9px 12px}
     .quick-range{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px}
     .quick-range .btn{padding:9px 12px}
     .field label{display:block;font-size:12px;color:var(--muted);font-weight:700;margin:0 0 5px 3px}
@@ -119,16 +117,16 @@
   </section>
 
   <section class="toolbar">
-    <div class="field"><label for="periodStart">?? ???</label><input id="periodStart" type="month"></div>
-    <div class="field"><label for="periodEnd">?? ???</label><input id="periodEnd" type="month"></div>
-    <div class="field"><label for="brandFilter">???</label><select id="brandFilter"></select></div>
-    <div class="field"><label for="searchInput">?? ??</label><input id="searchInput" placeholder="??, ??, ???? ??"></div>
-    <button class="btn secondary" id="csvBtn">CSV ????</button>
+    <div class="field"><label for="periodStart">조회 시작월</label><input id="periodStart" type="month"></div>
+    <div class="field"><label for="periodEnd">조회 종료월</label><input id="periodEnd" type="month"></div>
+    <div class="field"><label for="brandFilter">브랜드</label><select id="brandFilter"></select></div>
+    <div class="field"><label for="searchInput">매장 검색</label><input id="searchInput" placeholder="상호, 주소, 전화번호 검색"></div>
+    <button class="btn secondary" id="csvBtn">CSV 내려받기</button>
     <div class="quick-range">
-      <button class="btn secondary" type="button" data-range-months="1">?? 1?</button>
-      <button class="btn secondary" type="button" data-range-months="3">?? 3??</button>
-      <button class="btn secondary" type="button" data-range-months="6">?? 6??</button>
-      <button class="btn secondary" type="button" data-range-months="12">?? 1?</button>
+      <button class="btn secondary" type="button" data-range-months="1">최근 1달</button>
+      <button class="btn secondary" type="button" data-range-months="3">최근 3개월</button>
+      <button class="btn secondary" type="button" data-range-months="6">최근 6개월</button>
+      <button class="btn secondary" type="button" data-range-months="12">최근 1년</button>
     </div>
   </section>
 
@@ -253,9 +251,9 @@ function initSelect(el, values, allLabel) {
 const detailMonths = [...new Set(records.map(r => r.month))].sort();
 const months = [...new Set(detailMonths)].sort();
 const brands = [...new Set(records.map(r=>r.brand))].sort((a,b)=>a.localeCompare(b,"ko"));
-initSelect($("brandFilter"), brands, "?? ???");
-$("periodPill").textContent = `???? ${APP_DATA.historyFrom} ~ ${APP_DATA.completedThrough}`;
-$("updatePill").textContent = `???? ${APP_DATA.updatedAt}`;
+initSelect($("brandFilter"), brands, "전체 브랜드");
+$("periodPill").textContent = `시장통계 ${APP_DATA.historyFrom} ~ ${APP_DATA.completedThrough}`;
+$("updatePill").textContent = `업데이트 ${APP_DATA.updatedAt}`;
 
 function selectedPeriod() {
   let start = $("periodStart").value || detailMonths[0] || "";
@@ -595,7 +593,7 @@ refresh();
 <script>
 (() => {
   const script = document.createElement("script");
-  script.src = location.protocol === "file:" ? "./cloud.js" : "/cloud.js";
+  script.src = "./cloud.js";
   document.body.appendChild(script);
 })();
 </script>

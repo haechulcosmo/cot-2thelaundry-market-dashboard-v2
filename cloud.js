@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
   const REVIEW_KEY = "thelaundry-review-overrides-v1";
   const SYNC_MARKER = "thelaundry-cloud-sync-v1";
 

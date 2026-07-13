@@ -104,24 +104,6 @@
     update.title = "오늘 기준 최신 자료까지 갱신 요청합니다. 매월 1일 자동 갱신도 함께 동작합니다.";
     update.addEventListener("click", () => requestMonthlyUpdate(update));
     csv.parentElement.insertBefore(update, csv);
-
-    const history = document.createElement("a");
-    history.className = "btn secondary";
-    history.href = "/history.html";
-    history.textContent = "개별 데이터 검토";
-    history.title = "개별 후보 데이터를 열어 원본과 판정 내용을 확인합니다.";
-    csv.parentElement.insertBefore(history, csv);
-
-    const sync = document.createElement("button");
-    sync.className = "btn secondary";
-    sync.type = "button";
-    sync.textContent = "공용데이터 새로고침";
-    sync.addEventListener("click", async () => {
-      sessionStorage.removeItem(SYNC_MARKER);
-      await loadSharedReviews();
-      location.reload();
-    });
-    csv.parentElement.insertBefore(sync, csv);
   }
 
   document.addEventListener(

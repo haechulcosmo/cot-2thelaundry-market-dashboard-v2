@@ -29,6 +29,10 @@
     .card-label{font-size:13px;color:var(--muted);font-weight:700}.card-value{font-size:30px;font-weight:800;margin-top:8px;letter-spacing:-.04em}
     .card-note{font-size:12px;color:var(--muted);margin-top:3px}
     .toolbar{background:var(--paper);border-radius:16px;padding:15px;box-shadow:var(--shadow);display:grid;grid-template-columns:1fr 1fr 1fr 2fr auto;gap:10px;align-items:end}
+    .quick-range{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px}
+    .quick-range .btn{padding:9px 12px}
+    .quick-range{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px}
+    .quick-range .btn{padding:9px 12px}
     .field label{display:block;font-size:12px;color:var(--muted);font-weight:700;margin:0 0 5px 3px}
     select,input{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff;color:var(--ink);outline:none}
     select:focus,input:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(25,165,140,.13)}
@@ -89,7 +93,7 @@
     .review-note{grid-column:1/-1}.review-help{font-size:11px;color:var(--muted);margin-top:9px}
     .empty{text-align:center;padding:60px;color:var(--muted)}
     footer{color:var(--muted);font-size:12px;padding:24px 4px 8px;line-height:1.7}
-    @media(max-width:1050px){.cards{grid-template-columns:repeat(3,1fr)}.toolbar{grid-template-columns:1fr 1fr}.grid,.ranking-grid{grid-template-columns:1fr}.rank-list{grid-template-columns:1fr}}
+    @media(max-width:1050px){.cards{grid-template-columns:repeat(3,1fr)}.toolbar{grid-template-columns:1fr 1fr}.grid,.ranking-grid{grid-template-columns:1fr}.rank-list{grid-template-columns:1fr}.quick-range{grid-column:1 / -1}}
     @media(max-width:680px){.shell{padding:12px}.hero{padding:23px 20px}.cards{grid-template-columns:1fr 1fr}.toolbar{grid-template-columns:1fr}.card-value{font-size:25px}.month-chart{height:190px}.share-row{grid-template-columns:100px 1fr 55px}.modal-body{grid-template-columns:1fr}.modal-key{margin-top:7px}.modal-actions{grid-column:1}.review-fields{grid-template-columns:1fr}}
   </style>
 </head>
@@ -115,12 +119,17 @@
   </section>
 
   <section class="toolbar">
-    <div class="field"><label for="periodStart">조회 시작월</label><select id="periodStart"></select></div>
-    <div class="field"><label for="periodEnd">조회 종료월</label><select id="periodEnd"></select></div>
-    <div class="field"><label for="brandFilter">브랜드</label><select id="brandFilter"></select></div>
-    <div class="field"><label for="judgmentFilter">개설판정</label><select id="judgmentFilter"></select></div>
-    <div class="field"><label for="searchInput">매장 검색</label><input id="searchInput" placeholder="상호, 주소, 전화번호 검색"></div>
-    <button class="btn secondary" id="csvBtn">CSV 내려받기</button>
+    <div class="field"><label for="periodStart">?? ???</label><input id="periodStart" type="month"></div>
+    <div class="field"><label for="periodEnd">?? ???</label><input id="periodEnd" type="month"></div>
+    <div class="field"><label for="brandFilter">???</label><select id="brandFilter"></select></div>
+    <div class="field"><label for="searchInput">?? ??</label><input id="searchInput" placeholder="??, ??, ???? ??"></div>
+    <button class="btn secondary" id="csvBtn">CSV ????</button>
+    <div class="quick-range">
+      <button class="btn secondary" type="button" data-range-months="1">?? 1?</button>
+      <button class="btn secondary" type="button" data-range-months="3">?? 3??</button>
+      <button class="btn secondary" type="button" data-range-months="6">?? 6??</button>
+      <button class="btn secondary" type="button" data-range-months="12">?? 1?</button>
+    </div>
   </section>
 
   <section class="grid">
@@ -244,13 +253,9 @@ function initSelect(el, values, allLabel) {
 const detailMonths = [...new Set(records.map(r => r.month))].sort();
 const months = [...new Set(detailMonths)].sort();
 const brands = [...new Set(records.map(r=>r.brand))].sort((a,b)=>a.localeCompare(b,"ko"));
-const judgments = [...new Set(records.map(r => r.judgment))].sort((a,b)=>a.localeCompare(b,"ko"));
-initSelect($("periodStart"), detailMonths, "전체 기간 시작");
-initSelect($("periodEnd"), detailMonths, "전체 기간 종료");
-initSelect($("brandFilter"), brands, "전체 브랜드");
-initSelect($("judgmentFilter"), judgments, "전체 판정");
-$("periodPill").textContent = `시장통계 ${APP_DATA.historyFrom} ~ ${APP_DATA.completedThrough}`;
-$("updatePill").textContent = `업데이트 ${APP_DATA.updatedAt}`;
+initSelect($("brandFilter"), brands, "?? ???");
+$("periodPill").textContent = `???? ${APP_DATA.historyFrom} ~ ${APP_DATA.completedThrough}`;
+$("updatePill").textContent = `???? ${APP_DATA.updatedAt}`;
 
 function selectedPeriod() {
   let start = $("periodStart").value || detailMonths[0] || "";
@@ -270,12 +275,21 @@ function periodMonths(start,end) {
   return out;
 }
 
+function applyQuickRange(monthCount) {
+  const end = APP_DATA.completedThrough || detailMonths[detailMonths.length-1] || "";
+  if(!end) return;
+  const start = shiftMonth(end, -(monthCount - 1));
+  $("periodStart").value = start;
+  $("periodEnd").value = end;
+  refresh();
+}
+
 function filteredRecords() {
   const {start,end} = selectedPeriod();
-  const b = $("brandFilter").value, j = $("judgmentFilter").value;
+  const b = $("brandFilter").value;
   const q = $("searchInput").value.trim().toLowerCase();
   return records.filter(r => ((!start || !end) || (r.month>=start && r.month<=end)) &&
-    (!b || r.brand===b) && (!j || r.judgment===j) &&
+    (!b || r.brand===b) &&
     (!q || [r.name,r.address,r.phone,r.dbName,r.qdbName,r.brand].join(" ").toLowerCase().includes(q)));
 }
 
@@ -558,7 +572,7 @@ function refresh(reset=true) {
   renderPeriodRank(); renderCumulativeRank();
 }
 
-["periodStart","periodEnd","brandFilter","judgmentFilter"].forEach(id=>$(id).addEventListener("change",()=>refresh()));
+["periodStart","periodEnd","brandFilter"].forEach(id=>$(id).addEventListener("change",()=>refresh()));
 $("searchInput").addEventListener("input",()=>refresh());
 $("prevBtn").addEventListener("click",()=>{page--;refresh(false)});
 $("nextBtn").addEventListener("click",()=>{page++;refresh(false)});
@@ -574,6 +588,7 @@ $("csvBtn").addEventListener("click",()=>{
 
 $("periodStart").value = APP_DATA.auditedFrom || detailMonths[0] || "";
 $("periodEnd").value = APP_DATA.completedThrough || detailMonths[detailMonths.length-1] || "";
+document.querySelectorAll("[data-range-months]").forEach(btn => btn.addEventListener("click", () => applyQuickRange(Number(btn.dataset.rangeMonths || 1))));
 renderHeaderMeta();
 refresh();
 </script>

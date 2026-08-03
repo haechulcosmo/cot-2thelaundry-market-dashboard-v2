@@ -1,21 +1,15 @@
 {
-  "month": "2026-07",
+  "month": "2026-08",
   "updatedAt": "2026-08-03",
-  "partial": false,
-  "dbLand": 9,
-  "qdb": 29,
-  "mergedCandidates": 34,
-  "added": 17,
+  "partial": true,
+  "dbLand": 0,
+  "qdb": 2,
+  "mergedCandidates": 2,
+  "added": 2,
   "judgments": {
-    "사용자검토필요": 17
+    "사용자검토필요": 2
   },
   "brands": {
-    "버블맨": 1,
-    "개인": 8,
-    "워시프렌즈": 2,
-    "워시팡팡": 2,
-    "워시엔조이": 1,
-    "호텔런드리": 2,
-    "크린업24": 1
+    "개인": 2
   }
 }

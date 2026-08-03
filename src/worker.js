@@ -2,6 +2,18 @@ import dashboardHtml from "../index.html";
 import historyHtml from "../history.html";
 import cloudJs from "../cloud.js";
 
+function extractAppData(html) {
+  const match = html.match(/(?:const|let)\s+APP_DATA\s*=\s*(\{[\s\S]*?\});\s*\n/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+const dashboardAppData = extractAppData(dashboardHtml);
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -113,6 +125,13 @@ export default {
       };
       await env.REVIEWS.put("monthly-update-status", JSON.stringify(status));
       return Response.json({ ok: true, status });
+    }
+
+    if (url.pathname === "/api/app-data" && request.method === "GET") {
+      return Response.json(
+        { data: dashboardAppData || null },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
 
     if (url.pathname === "/api/source/dbland" && request.method === "GET") {

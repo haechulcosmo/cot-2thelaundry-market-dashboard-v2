@@ -33,6 +33,7 @@ const serverCode = `const files = {
 };
 
 const backendOrigin = "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev";
+const repoAppDataUrl = "https://raw.githubusercontent.com/haechulcosmo/cot-2thelaundry-market-dashboard-v2/master/index.html";
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -59,6 +60,37 @@ function safePathname(url) {
 export default {
   async fetch(request) {
     const pathname = safePathname(request.url);
+
+    if (pathname === "/api/app-data") {
+      const extractAppData = (html) => {
+        const match = html.match(/(?:const|let)\\s+APP_DATA\\s*=\\s*(\\{[\\s\\S]*?\\});\\s*\\n/);
+        if (!match) return null;
+        try {
+          return JSON.parse(match[1]);
+        } catch {
+          return null;
+        }
+      };
+
+      try {
+        const sourceResponse = await fetch(repoAppDataUrl, {
+          headers: { "cache-control": "no-cache" }
+        });
+        if (sourceResponse.ok) {
+          const html = await sourceResponse.text();
+          const data = extractAppData(html);
+          if (data) {
+            return new Response(JSON.stringify({ data }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+                "cache-control": "no-store",
+                "access-control-allow-origin": "*"
+              }
+            });
+          }
+        }
+      } catch {}
+    }
 
     if (pathname.startsWith("/api/")) {
       const targetUrl = backendOrigin + pathname + new URL(String(request.url || "https://example.com"), "https://example.com").search;

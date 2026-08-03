@@ -637,6 +637,283 @@ def build_history_record(item: dict, row_id: int, month: str) -> dict:
     }
 
 
+def source_label(item: dict) -> str:
+    return "DB랜드+QDB" if item["db"] and item["qdb"] else "DB랜드만" if item["db"] else "QDB만"
+
+
+def normalize_judgment(value: str) -> str:
+    mapping = {
+        "사용자검토": "사용자검토필요",
+        "기존·양도추정": "기존/양도매장",
+        "기존·양도제외": "기존/양도매장",
+        "기존양도제외": "기존/양도매장",
+        "신규확정": "신규오픈",
+        "신규반영": "신규오픈",
+    }
+    return mapping.get(str(value or ""), str(value or ""))
+
+
+def normalize_brand_status(value: str) -> str:
+    mapping = {
+        "상호단서 추정": "상호 단서 추정",
+    }
+    return mapping.get(str(value or ""), str(value or ""))
+
+
+def normalize_record_fields(record: dict) -> None:
+    record["judgment"] = normalize_judgment(record.get("judgment", ""))
+    record["brandStatus"] = normalize_brand_status(record.get("brandStatus", ""))
+    record["reviewRequired"] = record.get("judgment") == "사용자검토필요"
+
+
+def item_sort_key(item: dict) -> tuple[int, str]:
+    if item["db"] and item["qdb"]:
+        rank = 0
+    elif item["db"]:
+        rank = 1
+    else:
+        rank = 2
+    base = item["db"] or item["qdb"] or {}
+    return rank, base.get("date", datetime.min).isoformat()
+
+
+def candidate_names_for_item(item: dict) -> list[str]:
+    names = []
+    for row in (item.get("qdb"), item.get("db")):
+        if not row:
+            continue
+        name = str(row.get("name") or "")
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def candidate_names_for_record(record: dict) -> list[str]:
+    names = []
+    for key in ("name", "qdbName", "dbName"):
+        value = str(record.get(key) or "")
+        if value and value not in names:
+            names.append(value)
+    return names
+
+
+def full_name_score(left: str, right: str) -> int:
+    a = compact(left)
+    b = compact(right)
+    if not a or not b:
+        return 0
+    if a == b:
+        return 8
+    if a in b or b in a:
+        return 6
+    left_parts = masked_fragments(left)
+    right_parts = masked_fragments(right)
+    if any(part and part in b for part in left_parts):
+        return 5
+    if any(part and part in a for part in right_parts):
+        return 5
+    return 0
+
+
+def record_item_score(record: dict, item: dict, month: str) -> int:
+    if record.get("month") != month:
+        return -999
+    base = item["qdb"] or item["db"]
+    if not base:
+        return -999
+    score = 0
+    record_suffix = phone_suffix(record.get("phone", ""))
+    base_suffix = phone_suffix(base.get("phone", ""))
+    if record_suffix and base_suffix and record_suffix == base_suffix:
+        score += 12
+    record_address = str(record.get("address") or "")
+    base_address = str(base.get("address") or "")
+    common_tokens = address_tokens(record_address) & address_tokens(base_address)
+    score += min(6, len(common_tokens) * 2)
+    record_local = locality(record_address)
+    base_local = locality(base_address)
+    if record_local and base_local and record_local == base_local:
+        score += 2
+    item_names = candidate_names_for_item(item)
+    record_names = candidate_names_for_record(record)
+    if item_names and record_names:
+        score += max(
+            full_name_score(record_name, item_name)
+            for record_name in record_names
+            for item_name in item_names
+        )
+    record_date = parse_date(record.get("date", ""))
+    base_date = base.get("date")
+    if record_date and base_date and abs((record_date - base_date).days) <= 14:
+        score += 2
+    return score
+
+
+def monthly_history_counts(records: list[dict]) -> dict[str, dict[str, int]]:
+    included = {"신규오픈", "신규확정", "신규반영", "신규후보"}
+    counts: dict[str, Counter] = defaultdict(Counter)
+    for record in records:
+        if record.get("judgment") in included:
+            counts[record.get("month", "")][record.get("brand", "개인")] += 1
+    return {month: dict(counter) for month, counter in counts.items() if month}
+
+
+def should_add_qdb_only(month: str, db_count: int, qdb_count: int) -> bool:
+    if month == "2024-03":
+        return False
+    if db_count and qdb_count > max(120, db_count * 3):
+        return False
+    return True
+
+
+def maybe_upgrade_brand(record: dict, item: dict) -> None:
+    if record.get("brand") not in {"", "개인"}:
+        return
+    for name in [record.get("name", ""), *candidate_names_for_item(item)]:
+        brand, _ = classify_brand(name)
+        if brand != "개인":
+            record["brand"] = brand
+            if record.get("brandStatus") in {"", "개인/미확인", "상호 단서 추정"}:
+                record["brandStatus"] = "상호 단서 추정"
+            return
+
+
+def prefer_unmasked(current: str, candidate: str) -> str:
+    current = str(current or "")
+    candidate = str(candidate or "")
+    if not candidate:
+        return current
+    if current.count("*") >= 2 and candidate.count("*") < current.count("*"):
+        return candidate
+    if not current:
+        return candidate
+    return current
+
+
+def apply_item_to_record(record: dict, item: dict) -> None:
+    db = item["db"]
+    qdb = item["qdb"]
+    base = qdb or db or {}
+    record["source"] = source_label(item)
+    record["dbName"] = db["name"] if db else ""
+    record["qdbName"] = qdb["name"] if qdb else ""
+    record["dbDate"] = db["date"].isoformat() if db else None
+    record["qdbDate"] = qdb["date"].isoformat() if qdb else None
+    record["dbUrl"] = db["url"] if db else ""
+    record["qdbUrl"] = qdb["url"] if qdb else ""
+    if base:
+        record["phone"] = prefer_unmasked(record.get("phone", ""), base.get("phone", ""))
+        record["address"] = prefer_unmasked(record.get("address", ""), base.get("address", ""))
+    record["name"] = prefer_unmasked(record.get("name", ""), qdb["name"] if qdb else "")
+    maybe_upgrade_brand(record, item)
+
+
+def recompare_history(from_month: str) -> int:
+    html, data = load_app_data()
+    records = data["records"]
+    ceiling_month = str(data.get("completedThrough") or max((record.get("month", "") for record in records), default=""))
+    db_rows = collect_all_dbland(from_month)
+    qdb_rows = collect_all_qdb(from_month)
+
+    db_by_month: dict[str, list[dict]] = defaultdict(list)
+    qdb_by_month: dict[str, list[dict]] = defaultdict(list)
+    for row in db_rows:
+        db_by_month[row["date"].strftime("%Y-%m")].append(row)
+    for row in qdb_rows:
+        qdb_by_month[row["date"].strftime("%Y-%m")].append(row)
+
+    months = sorted(
+        month
+        for month in (set(db_by_month) | set(qdb_by_month) | {record.get("month", "") for record in records})
+        if month and month >= from_month and (not ceiling_month or month <= ceiling_month)
+    )
+    next_id = max((int(record["id"]) for record in records), default=0) + 1
+    added_records: list[dict] = []
+    updated_count = 0
+    summary_rows = []
+
+    for month in months:
+        month_records = [record for record in records if record.get("month") == month]
+        merged = merge_sources(db_by_month.get(month, []), qdb_by_month.get(month, []))
+        used_record_indexes: set[int] = set()
+        month_added = 0
+        month_updated = 0
+        db_count = len(db_by_month.get(month, []))
+        qdb_count = len(qdb_by_month.get(month, []))
+        allow_qdb_only = should_add_qdb_only(month, db_count, qdb_count)
+
+        for item in sorted(merged, key=item_sort_key):
+            ranked = sorted(
+                (
+                    (record_item_score(record, item, month), index)
+                    for index, record in enumerate(month_records)
+                    if index not in used_record_indexes
+                ),
+                reverse=True,
+                key=lambda row: row[0],
+            )
+            score, match_index = ranked[0] if ranked else (-999, -1)
+            if score >= 10 and match_index >= 0:
+                apply_item_to_record(month_records[match_index], item)
+                used_record_indexes.add(match_index)
+                updated_count += 1
+                month_updated += 1
+                continue
+
+            if item["db"] or allow_qdb_only:
+                record = build_record(item, next_id, month, records + added_records)
+                if item["qdb"] and not item["db"] and record.get("source") != "QDB만":
+                    record["source"] = "QDB만"
+                added_records.append(record)
+                month_records.append(record)
+                used_record_indexes.add(len(month_records) - 1)
+                next_id += 1
+                month_added += 1
+                time.sleep(0.2)
+
+        summary_rows.append(
+            {
+                "month": month,
+                "dbLand": db_count,
+                "qdb": qdb_count,
+                "merged": len(merged),
+                "existing": len([record for record in records if record.get("month") == month]),
+                "updated": month_updated,
+                "added": month_added,
+                "allowQdbOnlyAdd": allow_qdb_only,
+            }
+        )
+        print(
+            f"{month}: db={db_count} qdb={qdb_count} merged={len(merged)} "
+            f"updated={month_updated} added={month_added}"
+        )
+
+    records.extend(added_records)
+    for record in records:
+        normalize_record_fields(record)
+    records.sort(key=lambda record: record.get("date", ""), reverse=True)
+    data["updatedAt"] = datetime.now(KST).strftime("%Y-%m-%d")
+    data["sourceRecheckFrom"] = from_month
+    data["sourceRecheckAt"] = datetime.now(KST).isoformat()
+    data["sourceRecheckSummary"] = summary_rows
+    data["monthlyHistory"] = monthly_history_counts(records)
+    replace_app_data(html, data)
+
+    summary = {
+        "mode": "recompare",
+        "fromMonth": from_month,
+        "updatedAt": data["updatedAt"],
+        "dbLand": len(db_rows),
+        "qdb": len(qdb_rows),
+        "updated": updated_count,
+        "added": len(added_records),
+        "months": months,
+    }
+    SUMMARY.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def replace_app_data(html: str, data: dict) -> None:
     encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     marker = "const APP_DATA = "
@@ -701,6 +978,8 @@ def backfill_history(from_month: str) -> int:
         print(f"{month}: {len(month_added)}건 추가")
 
     existing_records.extend(added)
+    for record in existing_records:
+        normalize_record_fields(record)
     existing_records.sort(key=lambda record: record.get("date", ""), reverse=True)
     now_kst = datetime.now(KST)
     data["updatedAt"] = now_kst.strftime("%Y-%m-%d")
@@ -734,10 +1013,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--month", default="")
     parser.add_argument("--backfill", action="store_true")
+    parser.add_argument("--recompare", action="store_true")
     parser.add_argument("--from-month", default="2023-10")
     args = parser.parse_args()
     if args.backfill:
         return backfill_history(args.from_month)
+    if args.recompare:
+        return recompare_history(args.from_month)
     month = target_month(args.month)
     html, data = load_app_data()
     existing_records = data["records"]
@@ -773,6 +1055,8 @@ def main() -> int:
         time.sleep(0.25)
 
     data["records"].extend(added)
+    for record in data["records"]:
+        normalize_record_fields(record)
     now_kst = datetime.now(KST)
     data["updatedAt"] = now_kst.strftime("%Y-%m-%d")
     current_month = now_kst.strftime("%Y-%m")

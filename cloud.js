@@ -1,6 +1,19 @@
-﻿(() => {
+(() => {
   const REVIEW_KEY = "thelaundry-review-overrides-v1";
   const SYNC_MARKER = "thelaundry-cloud-sync-v1";
+  const UPDATE_POLL_MS = 15000;
+  const UPDATE_POLL_FAST_MS = 5000;
+  const APP_DATA_POLL_MS = 60000;
+  const DEFAULT_UPDATE_BUTTON_TEXT = "데이터 업데이트";
+
+  let updateButton = null;
+  let updatePollTimer = null;
+  let appDataPollTimer = null;
+  let lastStatusKey = "";
+  let handledCompletionKey = "";
+  let lastAppDataKey = "";
+  let statusInFlight = false;
+  let syncInFlight = false;
 
   function notice(message, kind = "info") {
     let el = document.getElementById("cloudNotice");
@@ -28,11 +41,109 @@
     return response.status === 204 ? null : response.json();
   }
 
+  function readAppData() {
+    try {
+      return window.eval("APP_DATA");
+    } catch {
+      return null;
+    }
+  }
+
+  function latestRecordMonth(data) {
+    const months = (data?.records || [])
+      .map((record) => String(record.month || ""))
+      .filter(Boolean)
+      .sort();
+    return months[months.length - 1] || "";
+  }
+
+  function appDataKey(data) {
+    if (!data) return "";
+    return [
+      data.updatedAt || "",
+      data.completedThrough || "",
+      latestRecordMonth(data),
+      Array.isArray(data.records) ? data.records.length : 0,
+    ].join("|");
+  }
+
+  function statusKey(status) {
+    if (!status) return "";
+    return [status.state || "", status.month || "", status.requestedAt || "", status.completedAt || ""].join("|");
+  }
+
+  function completionKey(status) {
+    if (!status || !["completed", "failed"].includes(status.state)) return "";
+    return [status.month || "", status.requestedAt || "", status.completedAt || "", status.state || ""].join("|");
+  }
+
   function localReviews() {
     try {
       return JSON.parse(localStorage.getItem(REVIEW_KEY) || "{}");
     } catch {
       return {};
+    }
+  }
+
+  function setUpdateButtonState(status) {
+    if (!updateButton) return;
+    const busy = status?.state === "requested" || status?.state === "running";
+    updateButton.disabled = busy;
+    updateButton.textContent = busy ? "업데이트 진행 중..." : DEFAULT_UPDATE_BUTTON_TEXT;
+    updateButton.title = busy
+      ? `${status?.month || "이번 달"} 데이터 업데이트가 진행 중입니다.`
+      : "오늘 기준 최신 자료까지 갱신 요청합니다. 매월 1일 자동 갱신도 함께 동작합니다.";
+  }
+
+  function syncPeriodToLatestMonth(beforeData, afterData) {
+    const start = document.getElementById("periodStart");
+    const end = document.getElementById("periodEnd");
+    if (!start || !end) return;
+
+    const beforeLatest = latestRecordMonth(beforeData) || beforeData?.completedThrough || "";
+    const afterLatest = latestRecordMonth(afterData) || afterData?.completedThrough || "";
+    if (!afterLatest) return;
+
+    const currentEnd = end.value || beforeData?.completedThrough || beforeLatest || "";
+    const shouldMoveEnd =
+      !end.value ||
+      currentEnd === beforeData?.completedThrough ||
+      currentEnd === beforeLatest;
+
+    if (shouldMoveEnd && currentEnd < afterLatest) {
+      end.value = afterLatest;
+      if (!start.value || start.value > end.value) {
+        start.value = end.value;
+      }
+    }
+  }
+
+  async function syncDashboardData({ noticeMessage = "" } = {}) {
+    if (syncInFlight || typeof window.loadLatestAppData !== "function") return false;
+    syncInFlight = true;
+    try {
+      const beforeData = readAppData();
+      const beforeKey = appDataKey(beforeData);
+      const loaded = await window.loadLatestAppData();
+      if (!loaded) return false;
+
+      const afterData = readAppData();
+      const afterKey = appDataKey(afterData);
+      lastAppDataKey = afterKey;
+
+      syncPeriodToLatestMonth(beforeData, afterData);
+      if (typeof window.renderHeaderMeta === "function") window.renderHeaderMeta();
+      if (typeof window.refresh === "function") window.refresh(false);
+
+      if (noticeMessage && beforeKey !== afterKey) {
+        notice(noticeMessage);
+      }
+      return beforeKey !== afterKey;
+    } catch (error) {
+      console.warn("대시보드 자동 갱신 실패", error);
+      return false;
+    } finally {
+      syncInFlight = false;
     }
   }
 
@@ -69,26 +180,21 @@
   }
 
   async function requestMonthlyUpdate(button) {
-    const original = button.textContent;
     button.disabled = true;
     button.textContent = "업데이트 요청 중...";
     try {
       const payload = await api("/api/update", { method: "POST", body: "{}" });
       const status = payload.status || {};
       notice(`${status.month || "이번 달"} 데이터 업데이트 요청이 접수되었습니다.`);
-      button.textContent = "업데이트 요청 완료";
-      button.title = `요청시각 ${status.requestedAt || ""}`;
-      window.setTimeout(() => {
-        button.disabled = false;
-        button.textContent = original;
-      }, 30000);
+      setUpdateButtonState(status);
+      startUpdatePolling(true);
     } catch (error) {
       const message = String(error).includes("429")
         ? "이미 업데이트 요청이 진행 중입니다. 잠시 후 다시 확인해 주세요."
         : "업데이트 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.";
       notice(message, "error");
       button.disabled = false;
-      button.textContent = original;
+      button.textContent = DEFAULT_UPDATE_BUTTON_TEXT;
     }
   }
 
@@ -100,10 +206,76 @@
     update.id = "monthlyUpdateBtn";
     update.className = "btn";
     update.type = "button";
-    update.textContent = "데이터 업데이트";
+    update.textContent = DEFAULT_UPDATE_BUTTON_TEXT;
     update.title = "오늘 기준 최신 자료까지 갱신 요청합니다. 매월 1일 자동 갱신도 함께 동작합니다.";
     update.addEventListener("click", () => requestMonthlyUpdate(update));
     csv.parentElement.insertBefore(update, csv);
+    updateButton = update;
+  }
+
+  async function pollUpdateStatus() {
+    if (statusInFlight) return;
+    statusInFlight = true;
+    try {
+      const payload = await api("/api/update");
+      const status = payload?.status || {};
+      const currentStatusKey = statusKey(status);
+      const currentCompletionKey = completionKey(status);
+
+      setUpdateButtonState(status);
+
+      if (
+        currentCompletionKey &&
+        currentCompletionKey !== handledCompletionKey &&
+        currentStatusKey !== lastStatusKey
+      ) {
+        handledCompletionKey = currentCompletionKey;
+        const changed = await syncDashboardData({
+          noticeMessage:
+            status.state === "completed"
+              ? `${status.month || "이번 달"} 데이터가 자동 반영되었습니다.`
+              : "데이터 업데이트가 실패했습니다. 잠시 후 다시 시도해 주세요.",
+        });
+        if (!changed && status.state === "completed") {
+          notice(`${status.month || "이번 달"} 데이터 업데이트가 완료되었습니다.`);
+        }
+      }
+
+      lastStatusKey = currentStatusKey;
+    } catch (error) {
+      console.warn("업데이트 상태 확인 실패", error);
+    } finally {
+      statusInFlight = false;
+    }
+  }
+
+  async function pollAppData() {
+    try {
+      const payload = await api("/api/app-data");
+      const nextKey = appDataKey(payload?.data);
+      if (!nextKey) return;
+      if (!lastAppDataKey) {
+        lastAppDataKey = appDataKey(readAppData()) || nextKey;
+        return;
+      }
+      if (nextKey !== lastAppDataKey) {
+        await syncDashboardData({ noticeMessage: "공용 데이터가 최신 상태로 반영되었습니다." });
+      }
+    } catch (error) {
+      console.warn("공용 데이터 변경 확인 실패", error);
+    }
+  }
+
+  function startUpdatePolling(fast = false) {
+    if (updatePollTimer) window.clearInterval(updatePollTimer);
+    updatePollTimer = window.setInterval(pollUpdateStatus, fast ? UPDATE_POLL_FAST_MS : UPDATE_POLL_MS);
+    pollUpdateStatus();
+  }
+
+  function startAppDataPolling() {
+    if (appDataPollTimer) window.clearInterval(appDataPollTimer);
+    appDataPollTimer = window.setInterval(pollAppData, APP_DATA_POLL_MS);
+    pollAppData();
   }
 
   document.addEventListener(
@@ -117,5 +289,8 @@
   );
 
   addCloudControls();
+  lastAppDataKey = appDataKey(readAppData());
   loadSharedReviews();
+  startUpdatePolling();
+  startAppDataPolling();
 })();

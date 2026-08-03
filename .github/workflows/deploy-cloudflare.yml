@@ -2,7 +2,7 @@ name: Cloudflare 배포
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
     paths:
       - "index.html"
       - "history.html"

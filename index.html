@@ -210,6 +210,22 @@ const likelyJudgments = new Set(["신규오픈"]);
 const candidateJudgments = new Set(["사용자검토필요"]);
 const includedJudgments = new Set(["신규오픈"]);
 const REVIEW_STORAGE_KEY = "thelaundry-review-overrides-v1";
+const judgmentAliases = new Map([
+  ["사용자검토", "사용자검토필요"],
+  ["기존·양도추정", "기존/양도매장"],
+]);
+
+function normalizeJudgment(value) {
+  return judgmentAliases.get(value) || value || "사용자검토필요";
+}
+
+function normalizeRecord(record) {
+  record.judgment = normalizeJudgment(record.judgment);
+  record.reviewRequired = record.judgment === "사용자검토필요";
+  return record;
+}
+
+records.forEach(normalizeRecord);
 const baselineById = new Map(records.map(r=>[r.id,{
   brand:r.brand,judgment:r.judgment,reason:r.reason,brandStatus:r.brandStatus,
   identity:r.identity,reviewRequired:r.reviewRequired
@@ -254,6 +270,7 @@ const brands = [...new Set(records.map(r=>r.brand))].sort((a,b)=>a.localeCompare
 function rebuildAppState() {
   const selectedBrand = $("brandFilter").value;
   records.splice(0, records.length, ...(APP_DATA.records || []));
+  records.forEach(normalizeRecord);
 
   Object.keys(monthlyHistory).forEach(key => delete monthlyHistory[key]);
   Object.assign(monthlyHistory, APP_DATA.monthlyHistory || {});

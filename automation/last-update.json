@@ -5,11 +5,7 @@
   "dbLand": 0,
   "qdb": 2,
   "mergedCandidates": 2,
-  "added": 2,
-  "judgments": {
-    "사용자검토필요": 2
-  },
-  "brands": {
-    "개인": 2
-  }
+  "added": 0,
+  "judgments": {},
+  "brands": {}
 }

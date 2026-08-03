@@ -49,7 +49,7 @@ jobs:
           if schedule == "*/5 * * * *":
               try:
                   with urllib.request.urlopen(
-                      "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev/api/update",
+                      "https://thelaundry-market-dashboard-2026.cosmogpt1.chatgpt.site/api/update",
                       timeout=20,
                   ) as response:
                       status = json.load(response).get("status") or {}
@@ -90,7 +90,7 @@ jobs:
           }, ensure_ascii=False).encode("utf-8")
 
           request = urllib.request.Request(
-              "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev/api/update/complete",
+              "https://thelaundry-market-dashboard-2026.cosmogpt1.chatgpt.site/api/update/complete",
               data=payload,
               method="POST",
               headers={
@@ -185,7 +185,7 @@ jobs:
           }, ensure_ascii=False).encode("utf-8")
 
           request = urllib.request.Request(
-              "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev/api/update/complete",
+              "https://thelaundry-market-dashboard-2026.cosmogpt1.chatgpt.site/api/update/complete",
               data=payload,
               method="POST",
               headers={

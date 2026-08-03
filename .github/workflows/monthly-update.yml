@@ -38,6 +38,12 @@ jobs:
           import json
           import os
           import urllib.request
+          from datetime import datetime, timedelta, timezone
+
+          KST = timezone(timedelta(hours=9))
+
+          def current_month():
+              return datetime.now(KST).strftime("%Y-%m")
 
           event = os.environ.get("EVENT_NAME", "")
           schedule = os.environ.get("EVENT_SCHEDULE", "")
@@ -45,21 +51,37 @@ jobs:
           run = event == "workflow_dispatch" or schedule == "0 0 1 * *"
           requested = False
           requested_at = ""
+          current_status = {}
+
+          try:
+              with urllib.request.urlopen(
+                  "https://thelaundry-market-dashboard-2026.cosmogpt1.chatgpt.site/api/update",
+                  timeout=20,
+              ) as response:
+                  current_status = json.load(response).get("status") or {}
+          except Exception as exc:
+              print(f"업데이트 상태 확인 실패: {exc}")
 
           if schedule == "*/5 * * * *":
-              try:
-                  with urllib.request.urlopen(
-                      "https://thelaundry-market-dashboard-2026.cosmogpt1.chatgpt.site/api/update",
-                      timeout=20,
-                  ) as response:
-                      status = json.load(response).get("status") or {}
-                  if status.get("state") == "requested" and status.get("month"):
-                      run = True
-                      requested = True
-                      month = status["month"]
-                      requested_at = status.get("requestedAt", "")
-              except Exception as exc:
-                  print(f"수동 업데이트 요청 확인 실패: {exc}")
+              status = current_status
+              if status.get("state") == "requested" and status.get("month"):
+                  run = True
+                  requested = True
+                  month = status["month"]
+                  requested_at = status.get("requestedAt", "")
+
+          if event == "workflow_dispatch":
+              if not month:
+                  if current_status.get("state") in {"requested", "running"} and current_status.get("month"):
+                      month = current_status["month"]
+                  else:
+                      month = current_month()
+              if (
+                  current_status.get("month") == month
+                  and current_status.get("state") in {"requested", "running"}
+              ):
+                  requested = True
+                  requested_at = current_status.get("requestedAt", "")
 
           output = os.environ["GITHUB_OUTPUT"]
           with open(output, "a", encoding="utf-8") as fp:
@@ -141,6 +163,7 @@ jobs:
 
       - name: 갱신된 대시보드 배포
         if: steps.gate.outputs.run == 'true'
+        continue-on-error: true
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_DEPLOY_TOKEN }}
@@ -148,7 +171,7 @@ jobs:
           command: deploy
 
       - name: 업데이트 완료/실패 상태 알림
-        if: always() && steps.gate.outputs.requested == 'true'
+        if: always() && steps.gate.outputs.run == 'true'
         env:
           UPDATE_MONTH: ${{ steps.gate.outputs.month }}
           REQUESTED_AT: ${{ steps.gate.outputs.requested_at }}

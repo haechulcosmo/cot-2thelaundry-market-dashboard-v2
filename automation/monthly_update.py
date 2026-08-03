@@ -536,8 +536,8 @@ def build_record(item: dict, row_id: int, month: str, existing: list[dict]) -> d
         identity = "확인"
         brand_status = "네이버 확인"
         if prior:
-            judgment = "기존·양도추정"
-            reason = "과거 집계에 전화번호 뒷자리 또는 지역·상호가 일치하는 매장 존재"
+            judgment = "사용자검토"
+            reason = "과거 후보 일치만으로는 기존/양도 단정이 어려워 사용자 최종 확인 필요"
         elif matched.get("new_opening"):
             judgment = "신규확정"
             reason = "네이버 신규오픈 표시 확인"
@@ -549,9 +549,9 @@ def build_record(item: dict, row_id: int, month: str, existing: list[dict]) -> d
         brand, brand_basis = classify_brand(name)
         identity = "미확인"
         brand_status = "상호단서 추정" if brand != "개인" else "개인/미확인"
-        judgment = "기존·양도추정" if prior else "사용자검토"
+        judgment = "사용자검토"
         reason = (
-            "과거 집계와 동일 후보"
+            "과거 후보 일치만으로는 기존/양도 단정이 어려워 사용자 최종 확인 필요"
             if prior
             else "네이버 매장 단일 매칭 불가. 사용자 최종 확인 필요"
         )
@@ -714,6 +714,17 @@ def enrich_evidence_fields(record: dict) -> None:
 
     record["evidenceType"] = evidence_type
     record["evidenceUrl"] = evidence_url
+
+
+def has_strong_existing_evidence(record: dict) -> bool:
+    reason = clean_text(record.get("reason")) + " " + clean_text(record.get("evidenceNote"))
+    evidence_type = clean_text(record.get("evidenceType"))
+    roadview_url = clean_text(record.get("roadviewUrl"))
+    if roadview_url or evidence_type == "로드뷰":
+        return True
+    if re.search(r"20\d{2}-\d{2}-\d{2}", reason):
+        return True
+    return False
 
 
 def item_sort_key(item: dict) -> tuple[int, str]:

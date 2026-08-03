@@ -664,6 +664,56 @@ def normalize_record_fields(record: dict) -> None:
     record["judgment"] = normalize_judgment(record.get("judgment", ""))
     record["brandStatus"] = normalize_brand_status(record.get("brandStatus", ""))
     record["reviewRequired"] = record.get("judgment") == "사용자검토필요"
+    enrich_evidence_fields(record)
+
+
+def clean_text(value: object) -> str:
+    text = str(value or "").strip()
+    if text.lower() in {"none", "null"}:
+        return ""
+    return text
+
+
+def enrich_evidence_fields(record: dict) -> None:
+    evidence_type = clean_text(record.get("evidenceType"))
+    evidence_url = clean_text(record.get("evidenceUrl"))
+    evidence_note = clean_text(record.get("evidenceNote"))
+    reason = clean_text(record.get("reason"))
+    basis = clean_text(record.get("identityBasis"))
+    naver_url = clean_text(record.get("naverUrl"))
+    roadview_url = clean_text(record.get("roadviewUrl"))
+    db_url = clean_text(record.get("dbUrl"))
+    qdb_url = clean_text(record.get("qdbUrl"))
+    judgment = clean_text(record.get("judgment"))
+
+    if evidence_note:
+        record["evidenceNote"] = evidence_note
+    else:
+        pieces = [part for part in [reason, basis] if part]
+        record["evidenceNote"] = " / ".join(pieces)
+
+    if roadview_url and not evidence_type:
+        evidence_type = "로드뷰"
+    if roadview_url and not evidence_url:
+        evidence_url = roadview_url
+
+    if judgment == "기존/양도매장" and not evidence_type:
+        if "과거 집계" in reason or "동일 후보" in reason:
+            evidence_type = "과거집계대조"
+        elif "네이버" in reason:
+            evidence_type = "네이버매칭대조"
+        elif qdb_url and not db_url:
+            evidence_type = "QDB"
+        elif db_url and not qdb_url:
+            evidence_type = "DB랜드"
+        elif db_url and qdb_url:
+            evidence_type = "DB랜드+QDB"
+
+    if not evidence_url:
+        evidence_url = roadview_url or naver_url or qdb_url or db_url
+
+    record["evidenceType"] = evidence_type
+    record["evidenceUrl"] = evidence_url
 
 
 def item_sort_key(item: dict) -> tuple[int, str]:

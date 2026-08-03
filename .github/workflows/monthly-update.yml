@@ -4,14 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       month:
-        description: "업데이트할 월 (YYYY-MM, 비워두면 직전 월)"
+        description: "업데이트할 월(YYYY-MM, 비워두면 현재월)"
         required: false
         type: string
   schedule:
-    # 매월 1일 오전 9시(KST)에 직전 월을 마감 갱신
     - cron: "0 0 1 * *"
-    # 대시보드에서 접수된 수동 갱신 요청 확인
-    - cron: "*/30 * * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -24,11 +22,12 @@ jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
-      - name: 소스 받기
+      - name: 저장소 받기
         uses: actions/checkout@v4
 
-      - name: 실행 대상 확인
+      - name: 실행 여부 확인
         id: gate
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -42,12 +41,12 @@ jobs:
 
           event = os.environ.get("EVENT_NAME", "")
           schedule = os.environ.get("EVENT_SCHEDULE", "")
-          month = os.environ.get("INPUT_MONTH", "")
+          month = (os.environ.get("INPUT_MONTH", "") or "").strip()
           run = event == "workflow_dispatch" or schedule == "0 0 1 * *"
           requested = False
           requested_at = ""
 
-          if schedule == "*/30 * * * *":
+          if schedule == "*/5 * * * *":
               try:
                   with urllib.request.urlopen(
                       "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev/api/update",
@@ -60,7 +59,7 @@ jobs:
                       month = status["month"]
                       requested_at = status.get("requestedAt", "")
               except Exception as exc:
-                  print(f"수동 갱신 요청 확인 실패: {exc}")
+                  print(f"수동 업데이트 요청 확인 실패: {exc}")
 
           output = os.environ["GITHUB_OUTPUT"]
           with open(output, "a", encoding="utf-8") as fp:
@@ -68,6 +67,39 @@ jobs:
               fp.write(f"requested={'true' if requested else 'false'}\n")
               fp.write(f"month={month}\n")
               fp.write(f"requested_at={requested_at}\n")
+          PY
+
+      - name: 업데이트 시작 상태 알림
+        if: steps.gate.outputs.requested == 'true'
+        env:
+          UPDATE_MONTH: ${{ steps.gate.outputs.month }}
+          REQUESTED_AT: ${{ steps.gate.outputs.requested_at }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from datetime import datetime, timezone
+
+          payload = json.dumps({
+              "state": "running",
+              "month": os.environ.get("UPDATE_MONTH", ""),
+              "requestedAt": os.environ.get("REQUESTED_AT", ""),
+              "startedAt": datetime.now(timezone.utc).isoformat(),
+              "message": "GitHub 자동 수집 작업이 시작되었습니다.",
+          }, ensure_ascii=False).encode("utf-8")
+
+          request = urllib.request.Request(
+              "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev/api/update/complete",
+              data=payload,
+              method="POST",
+              headers={
+                  "Content-Type": "application/json",
+                  "x-update-callback": "c7ef1d9a4b6240f69837e2ab51d2c8f4",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=20) as response:
+              print(response.read().decode("utf-8"))
           PY
 
       - name: Python 준비
@@ -80,7 +112,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: pip install requests beautifulsoup4
 
-      - name: DB랜드·QDB·네이버 수집 및 대시보드 반영
+      - name: 월 데이터 수집 및 대시보드 반영
         if: steps.gate.outputs.run == 'true'
         env:
           UPDATE_MONTH: ${{ steps.gate.outputs.month }}
@@ -94,16 +126,16 @@ jobs:
           cat automation/last-update.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: 변경사항 저장
+      - name: 변경사항 커밋
         if: steps.gate.outputs.run == 'true'
         run: |
           git config user.name "더런드리 업데이트 봇"
           git config user.email "actions@users.noreply.github.com"
           git add index.html automation/last-update.json
           if git diff --cached --quiet; then
-            echo "추가할 새 데이터가 없습니다."
+            echo "추가 변경사항이 없습니다."
           else
-            git commit -m "data: 월별 빨래방 시장 데이터 업데이트"
+            git commit -m "data: 셀프빨래방 시장 데이터 업데이트"
             git push
           fi
 
@@ -115,11 +147,12 @@ jobs:
           accountId: 5c79c5d1542add21beb7611104f4050d
           command: deploy
 
-      - name: 수동 갱신 완료 알림
-        if: success() && steps.gate.outputs.requested == 'true'
+      - name: 업데이트 완료/실패 상태 알림
+        if: always() && steps.gate.outputs.requested == 'true'
         env:
           UPDATE_MONTH: ${{ steps.gate.outputs.month }}
           REQUESTED_AT: ${{ steps.gate.outputs.requested_at }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           python - <<'PY'
           import json
@@ -127,19 +160,30 @@ jobs:
           import urllib.request
           from datetime import datetime, timezone
 
+          summary = {}
           try:
               with open("automation/last-update.json", encoding="utf-8") as fp:
                   summary = json.load(fp)
           except FileNotFoundError:
               summary = {}
 
+          job_status = os.environ.get("JOB_STATUS", "")
+          state = "completed" if job_status == "success" else "failed"
+          message = (
+              "데이터 업데이트가 완료되었습니다."
+              if state == "completed"
+              else f"데이터 업데이트가 실패했습니다. GitHub Actions 상태: {job_status}"
+          )
+
           payload = json.dumps({
-              "state": "completed",
+              "state": state,
               "month": os.environ.get("UPDATE_MONTH", ""),
               "requestedAt": os.environ.get("REQUESTED_AT", ""),
               "completedAt": datetime.now(timezone.utc).isoformat(),
               "summary": summary,
+              "message": message,
           }, ensure_ascii=False).encode("utf-8")
+
           request = urllib.request.Request(
               "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev/api/update/complete",
               data=payload,

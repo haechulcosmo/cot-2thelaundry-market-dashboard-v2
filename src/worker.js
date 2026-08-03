@@ -2,6 +2,9 @@ import dashboardHtml from "../index.html";
 import historyHtml from "../history.html";
 import cloudJs from "../cloud.js";
 
+const UPDATE_CALLBACK_TOKEN = "c7ef1d9a4b6240f69837e2ab51d2c8f4";
+const UPDATE_STALE_MS = 2 * 60 * 60 * 1000;
+
 function extractAppData(html) {
   const match = html.match(/(?:const|let)\s+APP_DATA\s*=\s*(\{[\s\S]*?\});\s*\n/);
   if (!match) return null;
@@ -10,6 +13,78 @@ function extractAppData(html) {
   } catch {
     return null;
   }
+}
+
+function kstParts(date = new Date()) {
+  return Object.fromEntries(
+    new Intl.DateTimeFormat("en", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+}
+
+function currentMonthKst(date = new Date()) {
+  const parts = kstParts(date);
+  return `${parts.year}-${parts.month}`;
+}
+
+function formatRequestedAt(date = new Date()) {
+  const parts = kstParts(date);
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} KST`;
+}
+
+function parseStatusTimestamp(value) {
+  if (!value || typeof value !== "string") return null;
+
+  const native = Date.parse(value);
+  if (!Number.isNaN(native)) {
+    return native;
+  }
+
+  const kstMatch = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?\s*KST$/,
+  );
+  if (!kstMatch) return null;
+
+  const [, year, month, day, hour, minute, second = "00"] = kstMatch;
+  return Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour) - 9,
+    Number(minute),
+    Number(second),
+  );
+}
+
+function isStatusStale(status) {
+  if (!status || !["requested", "running"].includes(status.state)) return false;
+
+  const timestamp =
+    parseStatusTimestamp(status.startedAt) ||
+    parseStatusTimestamp(status.requestedAt) ||
+    parseStatusTimestamp(status.completedAt);
+
+  if (!timestamp) return true;
+  return Date.now() - timestamp > UPDATE_STALE_MS;
+}
+
+function statusSummary(status) {
+  if (!status) return null;
+  return {
+    ...status,
+    stale: isStatusStale(status),
+  };
 }
 
 const dashboardAppData = extractAppData(dashboardHtml);
@@ -35,6 +110,7 @@ export default {
           { headers: { "cache-control": "no-store" } },
         );
       }
+
       if (request.method === "PUT") {
         let payload;
         try {
@@ -56,6 +132,7 @@ export default {
         await env.REVIEWS.put("review-overrides-v1", encoded);
         return Response.json({ ok: true, saved: Object.keys(reviews).length });
       }
+
       return new Response("Method not allowed", { status: 405 });
     }
 
@@ -63,68 +140,85 @@ export default {
       if (request.method === "GET") {
         const status = await env.REVIEWS.get("monthly-update-status", "json");
         return Response.json(
-          { status: status || null },
+          { status: statusSummary(status) },
           { headers: { "cache-control": "no-store" } },
         );
       }
 
       if (request.method === "POST") {
         if (request.headers.get("origin") !== url.origin) {
-          return Response.json({ error: "대시보드에서만 실행할 수 있습니다." }, { status: 403 });
+          return Response.json({ error: "대시보드 화면에서만 실행할 수 있습니다." }, { status: 403 });
         }
 
+        const now = new Date();
+        const month = currentMonthKst(now);
+        const requestedAt = formatRequestedAt(now);
         const currentStatus = await env.REVIEWS.get("monthly-update-status", "json");
-        if (currentStatus?.state === "requested" || currentStatus?.state === "running") {
+        const stale = isStatusStale(currentStatus);
+        const sameMonthPending =
+          currentStatus &&
+          currentStatus.month === month &&
+          ["requested", "running"].includes(currentStatus.state) &&
+          !stale;
+
+        if (sameMonthPending) {
           return Response.json(
-            { error: "이미 갱신 작업이 요청되었습니다. 잠시 후 다시 확인해 주세요." },
+            {
+              error: "이미 같은 달 데이터 업데이트가 진행 중입니다. 잠시 후 다시 확인해 주세요.",
+              status: statusSummary(currentStatus),
+            },
             { status: 429 },
           );
         }
 
-        const parts = Object.fromEntries(
-          new Intl.DateTimeFormat("en", {
-            timeZone: "Asia/Seoul",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          })
-            .formatToParts(new Date())
-            .filter((part) => part.type !== "literal")
-            .map((part) => [part.type, part.value]),
-        );
-        const month = `${parts.year}-${parts.month}`;
-        const requestedAt = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} KST`;
-
-        const status = { state: "requested", month, requestedAt };
+        const status = {
+          state: "requested",
+          month,
+          requestedAt,
+          requestedBy: "dashboard",
+          supersededStatus: currentStatus && (stale || currentStatus.month !== month) ? currentStatus : null,
+        };
         await env.REVIEWS.put("monthly-update-status", JSON.stringify(status));
-        return Response.json({ ok: true, status }, { status: 202 });
+        return Response.json({ ok: true, status: statusSummary(status) }, { status: 202 });
       }
 
       return new Response("Method not allowed", { status: 405 });
     }
 
     if (url.pathname === "/api/update/complete" && request.method === "POST") {
-      if (request.headers.get("x-update-callback") !== "c7ef1d9a4b6240f69837e2ab51d2c8f4") {
+      if (request.headers.get("x-update-callback") !== UPDATE_CALLBACK_TOKEN) {
         return Response.json({ error: "권한이 없습니다." }, { status: 403 });
       }
+
       let payload = {};
       try {
         payload = await request.json();
       } catch {
-        // 완료 신호에는 본문이 없어도 됩니다.
+        payload = {};
       }
+
+      const rawState = String(payload.state || "").toLowerCase();
+      const state = ["requested", "running", "completed", "failed"].includes(rawState)
+        ? rawState
+        : "completed";
+
+      const currentStatus = await env.REVIEWS.get("monthly-update-status", "json");
       const status = {
-        state: payload.state === "running" ? "running" : "completed",
-        month: payload.month || "",
-        requestedAt: payload.requestedAt || "",
-        completedAt: payload.completedAt || new Date().toISOString(),
-        summary: payload.summary || null,
+        ...(currentStatus || {}),
+        state,
+        month: payload.month || currentStatus?.month || "",
+        requestedAt: payload.requestedAt || currentStatus?.requestedAt || "",
+        startedAt: payload.startedAt || currentStatus?.startedAt || "",
+        completedAt:
+          state === "completed" || state === "failed"
+            ? payload.completedAt || new Date().toISOString()
+            : currentStatus?.completedAt || "",
+        summary: payload.summary || currentStatus?.summary || null,
+        message: payload.message || "",
       };
+
       await env.REVIEWS.put("monthly-update-status", JSON.stringify(status));
-      return Response.json({ ok: true, status });
+      return Response.json({ ok: true, status: statusSummary(status) });
     }
 
     if (url.pathname === "/api/app-data" && request.method === "GET") {
@@ -135,9 +229,10 @@ export default {
     }
 
     if (url.pathname === "/api/source/dbland" && request.method === "GET") {
-      if (request.headers.get("x-update-callback") !== "c7ef1d9a4b6240f69837e2ab51d2c8f4") {
+      if (request.headers.get("x-update-callback") !== UPDATE_CALLBACK_TOKEN) {
         return Response.json({ error: "권한이 없습니다." }, { status: 403 });
       }
+
       const page = Math.max(1, Math.min(1000, Number(url.searchParams.get("page") || 1)));
       const form = new URLSearchParams({
         type: "place",
@@ -145,6 +240,7 @@ export default {
         itemsPerPage: "50",
         currentPage: String(page),
       });
+
       const source = await fetch("https://db-land.kr/archive/proc/get_list.php", {
         method: "POST",
         headers: {
@@ -155,6 +251,7 @@ export default {
         },
         body: form.toString(),
       });
+
       return new Response(source.body, {
         status: source.status,
         headers: {

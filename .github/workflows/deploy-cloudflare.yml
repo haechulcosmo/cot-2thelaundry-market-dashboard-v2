@@ -25,10 +25,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: 소스 받기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cloudflare Worker 배포
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_DEPLOY_TOKEN }}
           accountId: 5c79c5d1542add21beb7611104f4050d

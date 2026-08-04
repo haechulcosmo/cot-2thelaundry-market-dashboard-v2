@@ -146,6 +146,15 @@ jobs:
           UPDATE_MONTH: ${{ steps.gate.outputs.month }}
         run: python automation/monthly_update.py --month "$UPDATE_MONTH"
 
+      - name: 사용자검토 자동 정리
+        if: steps.gate.outputs.run == 'true'
+        env:
+          UPDATE_MONTH: ${{ steps.gate.outputs.month }}
+        run: |
+          python -m automation.resolve_reviews "$UPDATE_MONTH"
+          python automation/promote_confirmed_reviews.py
+          python automation/repair_app_data.py
+
       - name: 결과 요약
         if: steps.gate.outputs.run == 'true'
         run: |

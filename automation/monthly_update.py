@@ -87,6 +87,10 @@ def locality(address: str) -> str:
     return tokens[-1] if tokens else ""
 
 
+def normalized_address(address: str) -> str:
+    return compact(str(address or "").replace("*", ""))
+
+
 def address_tokens(address: str) -> set[str]:
     return {
         token
@@ -101,6 +105,31 @@ def masked_fragments(name: str) -> list[str]:
         for part in re.split(r"\*+", str(name or ""))
         if len(compact(part)) >= 2
     ]
+
+
+def identity_keys(name: str, phone: str, address: str) -> set[tuple[str, str, str]]:
+    keys: set[tuple[str, str, str]] = set()
+    suffix = phone_suffix(phone)
+    area = locality(address)
+    full_address = normalized_address(address)
+    compact_name = compact(name)
+
+    if suffix and full_address:
+        keys.add(("phone_addr", suffix, full_address))
+    if suffix and area:
+        keys.add(("phone_area", suffix, area))
+    if compact_name and full_address:
+        keys.add(("name_addr", compact_name, full_address))
+    if compact_name and area:
+        keys.add(("name_area", compact_name, area))
+    for fragment in masked_fragments(name):
+        if fragment and full_address:
+            keys.add(("fragment_addr", fragment, full_address))
+        if fragment and suffix:
+            keys.add(("fragment_phone", fragment, suffix))
+        if fragment and area:
+            keys.add(("fragment_area", fragment, area))
+    return keys
 
 
 def parse_date(value: str) -> datetime | None:
@@ -1000,15 +1029,15 @@ def backfill_history(from_month: str) -> int:
     for row in qdb_rows:
         qdb_by_month[row["date"].strftime("%Y-%m")].append(row)
 
-    existing_keys = {
-        (
-            record.get("month", ""),
-            phone_suffix(record.get("phone", "")),
-            locality(record.get("address", "")),
-            compact(record.get("dbName") or record.get("qdbName") or record.get("name", "")),
-        )
-        for record in existing_records
-    }
+    existing_keys: set[tuple[str, str, str, str]] = set()
+    for record in existing_records:
+        month = record.get("month", "")
+        for key in identity_keys(
+            str(record.get("dbName") or record.get("qdbName") or record.get("name", "")),
+            str(record.get("phone", "")),
+            str(record.get("address", "")),
+        ):
+            existing_keys.add((month, *key))
     next_id = max((int(record["id"]) for record in existing_records), default=0) + 1
     added = []
 
@@ -1018,18 +1047,14 @@ def backfill_history(from_month: str) -> int:
         month_added = []
         for item in merged:
             base = item["qdb"] or item["db"]
-            key = (
-                month,
-                phone_suffix(base["phone"]),
-                locality(base["address"]),
-                compact(base["name"]),
-            )
-            if key in existing_keys:
+            item_keys = {(month, *key) for key in identity_keys(base["name"], base["phone"], base["address"])}
+            if item_keys & existing_keys:
                 continue
             record = build_history_record(item, next_id, month)
             added.append(record)
             month_added.append(record)
-            existing_keys.add(key)
+            for key in item_keys:
+                existing_keys.add(key)
             next_id += 1
 
         if month_added and month not in data.get("monthlyHistory", {}):
@@ -1088,30 +1113,28 @@ def main() -> int:
     db_rows = collect_dbland(month)
     qdb_rows = collect_qdb(month)
     merged = merge_sources(db_rows, qdb_rows)
-    current_month_ids = {
-        (
-            phone_suffix(record.get("phone", "")),
-            locality(record.get("address", "")),
-            compact(record.get("dbName") or record.get("qdbName") or record.get("name", "")),
+    current_month_ids: set[tuple[str, str, str]] = set()
+    for record in existing_records:
+        if record.get("month") != month:
+            continue
+        current_month_ids.update(
+            identity_keys(
+                str(record.get("dbName") or record.get("qdbName") or record.get("name", "")),
+                str(record.get("phone", "")),
+                str(record.get("address", "")),
+            )
         )
-        for record in existing_records
-        if record.get("month") == month
-    }
 
     next_id = max((int(record["id"]) for record in existing_records), default=0) + 1
     added = []
     for item in merged:
         base = item["qdb"] or item["db"]
-        key = (
-            phone_suffix(base["phone"]),
-            locality(base["address"]),
-            compact(base["name"]),
-        )
-        if key in current_month_ids:
+        item_keys = identity_keys(base["name"], base["phone"], base["address"])
+        if item_keys & current_month_ids:
             continue
         record = build_record(item, next_id, month, existing_records + added)
         added.append(record)
-        current_month_ids.add(key)
+        current_month_ids.update(item_keys)
         next_id += 1
         time.sleep(0.25)
 

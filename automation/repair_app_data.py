@@ -66,6 +66,10 @@ def phone_suffix(value: object) -> str:
     return digits[-4:] if len(digits) >= 4 else ""
 
 
+def normalized_address(value: object) -> str:
+    return compact(str(value or "").replace("*", ""))
+
+
 def normalize_brand(text: str) -> str:
     token = compact(text)
     if not token:
@@ -110,6 +114,20 @@ def choose_canonical(records: list[dict]) -> dict:
         )
 
     return max(records, key=score)
+
+
+def identity_group_keys(record: dict) -> list[tuple[str, str, str]]:
+    month = str(record.get("month") or "")
+    name = str(record.get("name") or record.get("qdbName") or record.get("dbName") or "")
+    phone = phone_suffix(record.get("phone"))
+    address = normalized_address(record.get("address"))
+    keys: list[tuple[str, str, str]] = []
+    if month and phone and address:
+        keys.append((month, "phone_addr", f"{phone}|{address}"))
+    compact_name = compact(name)
+    if month and compact_name and address:
+        keys.append((month, "name_addr", f"{compact_name}|{address}"))
+    return keys
 
 
 def earlier_same_store(record: dict, prior_records: list[dict]) -> dict | None:
@@ -197,6 +215,59 @@ def main() -> None:
 
     deduped.extend(passthrough)
     records = deduped
+
+    # 1-1) 같은 월 + 동일 전화/주소 또는 동일 상호/주소도 한 건만 남기고 정리
+    by_identity: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+    passthrough = []
+    seen_ids: set[int] = set()
+    for record in records:
+        keys = identity_group_keys(record)
+        if not keys:
+            passthrough.append(record)
+            continue
+        placed = False
+        for key in keys:
+            if key in by_identity:
+                by_identity[key].append(record)
+                placed = True
+                break
+        if not placed:
+            by_identity[keys[0]].append(record)
+
+    rededuped: list[dict] = []
+    removed_same_month_alt = 0
+    for group in by_identity.values():
+        if len(group) == 1:
+            record = group[0]
+            record_id = int(record.get("id") or 0)
+            if record_id not in seen_ids:
+                rededuped.append(record)
+                seen_ids.add(record_id)
+            continue
+        canonical = choose_canonical(group)
+        earliest = min(group, key=lambda row: row.get("date", ""))
+        canonical["date"] = earliest.get("date")
+        if earliest.get("dbDate") and (
+            not canonical.get("dbDate") or earliest.get("dbDate") < canonical.get("dbDate")
+        ):
+            canonical["dbDate"] = earliest.get("dbDate")
+        if earliest.get("qdbDate") and (
+            not canonical.get("qdbDate") or earliest.get("qdbDate") < canonical.get("qdbDate")
+        ):
+            canonical["qdbDate"] = earliest.get("qdbDate")
+        record_id = int(canonical.get("id") or 0)
+        if record_id not in seen_ids:
+            rededuped.append(canonical)
+            seen_ids.add(record_id)
+        removed_same_month_alt += len(group) - 1
+
+    for record in passthrough:
+        record_id = int(record.get("id") or 0)
+        if record_id not in seen_ids:
+            rededuped.append(record)
+            seen_ids.add(record_id)
+
+    records = rededuped
 
     # 2) 브랜드 보정
     for record in records:
@@ -321,6 +392,7 @@ def main() -> None:
     data["updatedAt"] = datetime.now().strftime("%Y-%m-%d")
     data["repairSummary"] = {
         "removedSameMonthDuplicates": removed_same_month,
+        "removedSameMonthIdentityDuplicates": removed_same_month_alt,
         "promotedExisting": promoted_existing,
         "promotedNew": promoted_new,
         "demotedExisting": demoted_existing,

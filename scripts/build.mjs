@@ -33,7 +33,7 @@ const serverCode = `const files = {
 };
 
 const backendOrigin = "https://thelaundry-market-dashboard.thelaundry-market-2026.workers.dev";
-const repoAppDataUrl = "https://raw.githubusercontent.com/haechulcosmo/cot-2thelaundry-market-dashboard-v2/master/index.html";
+const repoAppDataUrl = "https://raw.githubusercontent.com/haechulcosmo/laundromat-count/main/index.html";
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",

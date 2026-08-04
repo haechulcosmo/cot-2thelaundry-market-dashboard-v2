@@ -54,10 +54,14 @@ jobs:
           current_status = {}
 
           try:
-              with urllib.request.urlopen(
+              request = urllib.request.Request(
                   "https://thelaundry-market-dashboard-2026.cosmogpt1.chatgpt.site/api/update",
-                  timeout=20,
-              ) as response:
+                  headers={
+                      "User-Agent": "Mozilla/5.0",
+                      "Accept": "application/json",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=20) as response:
                   current_status = json.load(response).get("status") or {}
           except Exception as exc:
               print(f"업데이트 상태 확인 실패: {exc}")
@@ -117,6 +121,8 @@ jobs:
               method="POST",
               headers={
                   "Content-Type": "application/json",
+                  "User-Agent": "Mozilla/5.0",
+                  "Accept": "application/json",
                   "x-update-callback": "c7ef1d9a4b6240f69837e2ab51d2c8f4",
               },
           )
@@ -213,6 +219,8 @@ jobs:
               method="POST",
               headers={
                   "Content-Type": "application/json",
+                  "User-Agent": "Mozilla/5.0",
+                  "Accept": "application/json",
                   "x-update-callback": "c7ef1d9a4b6240f69837e2ab51d2c8f4",
               },
           )
